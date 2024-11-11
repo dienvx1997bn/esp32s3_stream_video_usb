@@ -21,41 +21,25 @@
 #include "tinyusb.h"
 #include "tusb_cdc_acm.h"
 #include "sdkconfig.h"
+
+#include "freertos/semphr.h"
+#include "esp_async_memcpy.h"
+#include "esp_heap_caps.h"
 #include "esp_async_memcpy.h"
 
 #include "driver/gpio.h"
 
 
-#define INTERVAL 400
-#define WAIT vTaskDelay(INTERVAL)
-#define IMAGE_SIZE	240*240
+#ifndef CONFIG_TINYUSB_CDC_RX_BUFSIZE
+#define CONFIG_TINYUSB_CDC_RX_BUFSIZE 512
+#endif
 
 static const char *TAG = "TEST";
 
 
-static volatile uint8_t buf[64] = {0};	// > 30 * 2 + 4
+static volatile uint8_t buf[CONFIG_TINYUSB_CDC_RX_BUFSIZE + 1] = {0};	// > 30 * 2 + 4
 static volatile bool is_new_data = false;
 
-typedef struct USB_Data {
-	uint16_t index;
-	uint16_t length;
-	uint16_t data[1000];
-} USB_Data;
-
-USB_Data usb_data;
-uint8_t temp_data[2008] = {0};
-
-
-static void SPIFFS_Directory(char * path) {
-	DIR* dir = opendir(path);
-	assert(dir != NULL);
-	while (true) {
-		struct dirent*pe = readdir(dir);
-		if (!pe) break;
-		ESP_LOGI(__FUNCTION__,"d_name=%s d_ino=%d d_type=%x", pe->d_name,pe->d_ino, pe->d_type);
-	}
-	closedir(dir);
-}
 
 // #define CONFIG_WIDTH  240
 // #define CONFIG_HEIGHT 240
@@ -66,8 +50,8 @@ static void SPIFFS_Directory(char * path) {
 // #define CONFIG_RESET_GPIO 17
 // #define CONFIG_BL_GPIO 8
 
-// 'esp32', 240x240px
-static volatile uint16_t epd_bitmap_esp32 [] = {
+// 'image', 240x240px
+static volatile uint16_t epd_bitmap_240x240 [] = {
 	0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 
 	0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 
 	0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 
@@ -3671,7 +3655,7 @@ static volatile uint16_t epd_bitmap_esp32 [] = {
 };
 
 
-
+////////////////////////////////////////////////
 TickType_t JPEGTest(TFT_t * dev, char * file, int width, int height) {
 	TickType_t startTick, endTick, diffTick;
 	startTick = xTaskGetTickCount();
@@ -3687,7 +3671,7 @@ TickType_t JPEGTest(TFT_t * dev, char * file, int width, int height) {
 	for(row = 0; row < width; row = row + 16){
 		for(row_i = 0; row_i < 16; row_i++)
 		{
-			lcdDrawMultiPixels(dev, 0, row + row_i, height, &epd_bitmap_esp32[index]);
+			lcdDrawMultiPixels(dev, 0, row + row_i, height, &epd_bitmap_240x240[index]);
 			index += height;
 		}
 		
@@ -3708,13 +3692,31 @@ void ST7789(void *pvParameters)
 	lcdInit(&dev, CONFIG_WIDTH, CONFIG_HEIGHT, CONFIG_OFFSETX, CONFIG_OFFSETY);
 
 	while(1) {
-		JPEGTest(&dev, NULL, 240, 240);
-		gpio_set_level(GPIO_NUM_3, 0);
+		if(is_new_data)
+		{
+			is_new_data = false;
+			gpio_set_level(GPIO_NUM_46, 1);
+			JPEGTest(&dev, NULL, 240, 240);
+			gpio_set_level(GPIO_NUM_46, 0);
+		}
+		
 		vTaskDelay(1);
 	} // end while
 }
 
+////////////////////////////////////////////////
+// Create a semaphore used to report the completion of async memcpy
+SemaphoreHandle_t my_semaphore;
+async_memcpy_handle_t driver_handle = NULL;
 
+// Callback implementation, running in ISR context
+static bool my_async_memcpy_cb(async_memcpy_handle_t mcp_hdl, async_memcpy_event_t *event, void *cb_args)
+{
+    SemaphoreHandle_t sem = (SemaphoreHandle_t)cb_args;
+    BaseType_t high_task_wakeup = pdFALSE;
+    xSemaphoreGiveFromISR(my_semaphore, &high_task_wakeup); // high_task_wakeup set to pdTRUE if some high priority task unblocked
+    return high_task_wakeup == pdTRUE;
+}
 
 ////////////////////////////////////////////////
 void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
@@ -3726,16 +3728,29 @@ void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
 	static uint16_t byte_copied = 0;
 
     /* read */
-    esp_err_t ret = tinyusb_cdcacm_read(itf, buf, 64, &rx_size);
+    esp_err_t ret = tinyusb_cdcacm_read(itf, buf, CONFIG_TINYUSB_CDC_RX_BUFSIZE, &rx_size);
     if (ret == ESP_OK) {
+		gpio_set_level(GPIO_NUM_3, 0);
 		index_buffer = buf[0] | buf[1] << 8;
 		length_to_copy = buf[2] | buf[3] << 8;
 		length_to_copy = length_to_copy / 2; // 2 byte for one pixel
-		byte_copied += length_to_copy;
-		memcpy(&epd_bitmap_esp32[index_buffer * length_to_copy], &buf[4], length_to_copy * 2);
+		// byte_copied += length_to_copy;
+		// memcpy(&epd_bitmap_240x240[index_buffer * length_to_copy], &buf[4], length_to_copy * 2);
 		// ESP_LOGI(TAG, "index_buffer %d length_to_copy %d rx_size %d byte_copied %d", index_buffer, length_to_copy, rx_size,byte_copied);
+
+		// Called from user's context
+		ESP_ERROR_CHECK(esp_async_memcpy(driver_handle, &epd_bitmap_240x240[index_buffer * length_to_copy], &buf[4], length_to_copy * 2, my_async_memcpy_cb, my_semaphore));
+		// Do something else here
+		// xSemaphoreTake(my_semaphore, portMAX_DELAY); // Wait until the buffer copy is done
+		gpio_set_level(GPIO_NUM_3, 1);
+
 		if(index_buffer == 0) {
-			gpio_set_level(GPIO_NUM_3, 1);
+			// gpio_set_level(GPIO_NUM_3, 1);
+			byte_copied = 0;
+		}
+		if (index_buffer  >= 1919) {
+			// gpio_set_level(GPIO_NUM_3, 0);
+			is_new_data = true;
 		}
     } else {
         ESP_LOGE(TAG, "Read error");
@@ -3797,49 +3812,22 @@ void app_main(void)
 
 //     ESP_LOGI(TAG, "USB initialization DONE");
 	///////////////////////////////////////////////////////
-	ESP_LOGI(TAG, "Initializing SPIFFS");
-
-	esp_vfs_spiffs_conf_t conf = {
-		.base_path = "/spiffs",
-		.partition_label = NULL,
-		.max_files = 12,
-		.format_if_mount_failed =true
-	};
-
-	// Use settings defined above toinitialize and mount SPIFFS filesystem.
-	// Note: esp_vfs_spiffs_register is anall-in-one convenience function.
-	esp_err_t ret = esp_vfs_spiffs_register(&conf);
-
-	if (ret != ESP_OK) {
-		if (ret == ESP_FAIL) {
-			ESP_LOGE(TAG, "Failed to mount or format filesystem");
-		} else if (ret == ESP_ERR_NOT_FOUND) {
-			ESP_LOGE(TAG, "Failed to find SPIFFS partition");
-		} else {
-			ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)",esp_err_to_name(ret));
-		}
-		return;
-	}
-
-	size_t total = 0, used = 0;
-	ret = esp_spiffs_info(NULL, &total,&used);
-	if (ret != ESP_OK) {
-		ESP_LOGE(TAG,"Failed to get SPIFFS partition information (%s)",esp_err_to_name(ret));
-	} else {
-		ESP_LOGI(TAG,"Partition size: total: %d, used: %d", total, used);
-	}
-
-	//////////////////////////////
 	gpio_config_t io_conf = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = (1ULL << GPIO_NUM_3),
+        .pin_bit_mask = (1ULL << GPIO_NUM_3) | (1ULL << GPIO_NUM_46),
         .pull_up_en = 0,
         .pull_down_en = 0
     };
     gpio_config(&io_conf);
 	//////////////////////////////
+	async_memcpy_config_t config = ASYNC_MEMCPY_DEFAULT_CONFIG();
+	// update the maximum data stream supported by underlying DMA engine
+	config.backlog = 8;
+	my_semaphore = xSemaphoreCreateBinary();
+	ESP_ERROR_CHECK(esp_async_memcpy_install_gdma_ahb(&config, &driver_handle)); // install driver with default DMA engine
+	//////////////////////////////
+
 	
-	SPIFFS_Directory("/spiffs/");
 	xTaskCreate(ST7789, "ST7789", 1024*6, NULL, 2, NULL);
 }
