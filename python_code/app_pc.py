@@ -9,10 +9,10 @@ import os
 from time import sleep
 from PIL import Image
 
-BYTE_PER_MESSAGE = 60
+BYTE_PER_MESSAGE = 252
 
 def split_data_to_fit_size(data):
-    loop_count = len(data) / BYTE_PER_MESSAGE
+    loop_count = int(len(data) / BYTE_PER_MESSAGE)
     remainder = len(data) % BYTE_PER_MESSAGE
     byte_added = 0
     data_to_send = []
@@ -21,6 +21,7 @@ def split_data_to_fit_size(data):
 
     # normal data
     while i < loop_count:
+        # print(f"i {i} loop_count {loop_count}")
         my_array = [i & 255, (i >> 8) & 255, BYTE_PER_MESSAGE, 00]
         for _ in range(BYTE_PER_MESSAGE):
             my_array.append(data[byte_added])
@@ -127,7 +128,7 @@ def jpg_files_to_byte_arrays(folder_path):
     # Initialize a list to store the byte arrays
     byte_arrays = []
     file_list = os.listdir(folder_path)
-    sorted_files = sorted(file_list, key=lambda x: os.path.getmtime(os.path.join(folder_path, x)), reverse=True)
+    sorted_files = sorted(file_list, key=lambda x: os.path.getmtime(os.path.join(folder_path, x)), reverse=False)
     # Loop through each file in the folder
     for filename in sorted_files:
         # Process only files with .jpg extension
@@ -157,7 +158,7 @@ def send_image_over_serial(byte_array):
     # print(f"byte_array len {len(byte_array)}")
     data_to_send = split_data_to_fit_size(byte_array)
     # print(f"data_to_send {data_to_send}")
-    split_data = split_list_by_byte_size(data_to_send, 256)
+    split_data = split_list_by_byte_size(data_to_send, 512)
     # print(f"split_data {split_data}")
     for chunk in split_data:
         # print(f"chunk {chunk}")
@@ -175,7 +176,7 @@ if __name__ == "__main__":
     ser = serial.Serial(com_port, 115200)  # Tạo đối tượng serial, bạn có thể thay đổi baudrate nếu cần
 
     # test()
-    byte_arrays = jpg_files_to_byte_arrays("images")
+    byte_arrays = jpg_files_to_byte_arrays("cartoon")
 
     # byte_array = byte_arrays[0]
     # send_image_over_serial(byte_array)

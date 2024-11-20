@@ -30,15 +30,15 @@
 #include "driver/gpio.h"
 
 
-#ifndef CONFIG_TINYUSB_CDC_RX_BUFSIZE
-#define CONFIG_TINYUSB_CDC_RX_BUFSIZE 512
-#endif
+// #ifndef CONFIG_TINYUSB_CDC_RX_BUFSIZE
+// #define CONFIG_TINYUSB_CDC_RX_BUFSIZE 512
+// #endif
 
 static const char *TAG = "TEST";
 
 
 static volatile uint8_t buf[CONFIG_TINYUSB_CDC_RX_BUFSIZE + 1] = {0};	// > 30 * 2 + 4
-static volatile bool is_new_data = false;
+static volatile bool is_new_data = true;
 
 
 // #define CONFIG_WIDTH  240
@@ -51,7 +51,7 @@ static volatile bool is_new_data = false;
 // #define CONFIG_BL_GPIO 8
 
 // 'image', 240x240px
-static volatile uint16_t epd_bitmap_240x240 [] = {
+DRAM_ATTR  static uint16_t epd_bitmap_240x240 [] = {
 	0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 
 	0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 
 	0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 
@@ -3657,8 +3657,8 @@ static volatile uint16_t epd_bitmap_240x240 [] = {
 
 ////////////////////////////////////////////////
 TickType_t JPEGTest(TFT_t * dev, char * file, int width, int height) {
-	TickType_t startTick, endTick, diffTick;
-	startTick = xTaskGetTickCount();
+	// TickType_t startTick, endTick, diffTick;
+	// startTick = xTaskGetTickCount();
 
 	// ESP_LOGI(__FUNCTION__, "JPEGTest imageWidth=%d imageHeight=%d", width, height);
 
@@ -3669,7 +3669,7 @@ TickType_t JPEGTest(TFT_t * dev, char * file, int width, int height) {
 	int row = 0;
 	int row_i = 0;
 	for(row = 0; row < width; row = row + 16){
-		for(row_i = 0; row_i < 16; row_i++)
+		for(row_i = 0; row_i < 16; row_i += 1)
 		{
 			lcdDrawMultiPixels(dev, 0, row + row_i, height, &epd_bitmap_240x240[index]);
 			index += height;
@@ -3679,10 +3679,11 @@ TickType_t JPEGTest(TFT_t * dev, char * file, int width, int height) {
 		// vTaskDelay(1);
 	}
 
-	endTick = xTaskGetTickCount();
-	diffTick = endTick - startTick;
-	// ESP_LOGI(__FUNCTION__, "elapsed time[ms]:%"PRIu32,diffTick*portTICK_PERIOD_MS);
-	return diffTick;
+	// endTick = xTaskGetTickCount();
+	// diffTick = endTick - startTick;
+	// // ESP_LOGI(__FUNCTION__, "elapsed time[ms]:%"PRIu32,diffTick*portTICK_PERIOD_MS);
+	// return diffTick;
+	return 0;
 }
 
 void ST7789(void *pvParameters)
@@ -3690,6 +3691,8 @@ void ST7789(void *pvParameters)
 	TFT_t dev;
 	spi_master_init(&dev, CONFIG_MOSI_GPIO, CONFIG_SCLK_GPIO, CONFIG_CS_GPIO, CONFIG_DC_GPIO, CONFIG_RESET_GPIO, CONFIG_BL_GPIO);
 	lcdInit(&dev, CONFIG_WIDTH, CONFIG_HEIGHT, CONFIG_OFFSETX, CONFIG_OFFSETY);
+
+	ESP_LOGI(TAG, "ST7789 is running on core %d",xPortGetCoreID()); 
 
 	while(1) {
 		if(is_new_data)
@@ -3703,6 +3706,7 @@ void ST7789(void *pvParameters)
 		vTaskDelay(1);
 	} // end while
 }
+
 
 ////////////////////////////////////////////////
 // Create a semaphore used to report the completion of async memcpy
@@ -3725,40 +3729,38 @@ void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
     size_t rx_size = 0;
 	static uint16_t index_buffer = 0;
 	static uint16_t length_to_copy = 0;
-	static uint16_t byte_copied = 0;
+	// static uint16_t byte_copied = 0;
 
     /* read */
+	gpio_set_level(GPIO_NUM_3, 0);
     esp_err_t ret = tinyusb_cdcacm_read(itf, buf, CONFIG_TINYUSB_CDC_RX_BUFSIZE, &rx_size);
     if (ret == ESP_OK) {
-		gpio_set_level(GPIO_NUM_3, 0);
+		
 		index_buffer = buf[0] | buf[1] << 8;
 		length_to_copy = buf[2] | buf[3] << 8;
 		length_to_copy = length_to_copy / 2; // 2 byte for one pixel
 		// byte_copied += length_to_copy;
-		// memcpy(&epd_bitmap_240x240[index_buffer * length_to_copy], &buf[4], length_to_copy * 2);
+		memcpy(&epd_bitmap_240x240[index_buffer * length_to_copy], &buf[4], length_to_copy * 2);
 		// ESP_LOGI(TAG, "index_buffer %d length_to_copy %d rx_size %d byte_copied %d", index_buffer, length_to_copy, rx_size,byte_copied);
 
 		// Called from user's context
-		ESP_ERROR_CHECK(esp_async_memcpy(driver_handle, &epd_bitmap_240x240[index_buffer * length_to_copy], &buf[4], length_to_copy * 2, my_async_memcpy_cb, my_semaphore));
+		// ESP_ERROR_CHECK(esp_async_memcpy(driver_handle, &epd_bitmap_240x240[index_buffer * length_to_copy], &buf[4], length_to_copy * 2, my_async_memcpy_cb, my_semaphore));
 		// Do something else here
 		// xSemaphoreTake(my_semaphore, portMAX_DELAY); // Wait until the buffer copy is done
-		gpio_set_level(GPIO_NUM_3, 1);
 
-		if(index_buffer == 0) {
-			// gpio_set_level(GPIO_NUM_3, 1);
-			byte_copied = 0;
-		}
-		if (index_buffer  >= 1919) {
+		// if(index_buffer == 0) {
+		// 	// gpio_set_level(GPIO_NUM_3, 1);
+		// 	byte_copied = 0;
+		// }
+		// else 
+		if (index_buffer  >= 457) {
 			// gpio_set_level(GPIO_NUM_3, 0);
 			is_new_data = true;
 		}
     } else {
         ESP_LOGE(TAG, "Read error");
     }
-
-    // /* write back */
-    // tinyusb_cdcacm_write_queue(itf, buf, rx_size);
-    // tinyusb_cdcacm_write_flush(itf, 0);
+	gpio_set_level(GPIO_NUM_3, 1);
 }
 
 void tinyusb_cdc_line_state_changed_callback(int itf, cdcacm_event_t *event)
@@ -3795,11 +3797,11 @@ void app_main(void)
     };
 
     ESP_ERROR_CHECK(tusb_cdc_acm_init(&acm_cfg));
-    /* the second way to register a callback */
-    ESP_ERROR_CHECK(tinyusb_cdcacm_register_callback(
-                        TINYUSB_CDC_ACM_0,
-                        CDC_EVENT_LINE_STATE_CHANGED,
-                        &tinyusb_cdc_line_state_changed_callback));
+    // /* the second way to register a callback */
+    // ESP_ERROR_CHECK(tinyusb_cdcacm_register_callback(
+    //                     TINYUSB_CDC_ACM_0,
+    //                     CDC_EVENT_LINE_STATE_CHANGED,
+    //                     &tinyusb_cdc_line_state_changed_callback));
 
 #if (CONFIG_TINYUSB_CDC_COUNT > 1)
     acm_cfg.cdc_port = TINYUSB_CDC_ACM_1;
@@ -3829,5 +3831,5 @@ void app_main(void)
 	//////////////////////////////
 
 	
-	xTaskCreate(ST7789, "ST7789", 1024*6, NULL, 2, NULL);
+	xTaskCreatePinnedToCore(ST7789, "ST7789", 1024*6, NULL, 5, NULL, 1);
 }
