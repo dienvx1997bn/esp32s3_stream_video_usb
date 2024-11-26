@@ -127,7 +127,7 @@ bool spi_master_write_byte(spi_device_handle_t SPIHandle, const uint8_t* Data, s
 		memset( &SPITransaction, 0, sizeof( spi_transaction_t ) );
 		SPITransaction.length = DataLength * 8;
 		SPITransaction.tx_buffer = Data;
-#if 1
+#if 0
 		ret = spi_device_transmit( SPIHandle, &SPITransaction );
 #else
 		ret = spi_device_polling_transmit( SPIHandle, &SPITransaction );
