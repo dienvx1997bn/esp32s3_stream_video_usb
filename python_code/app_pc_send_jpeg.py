@@ -155,7 +155,7 @@ def send_image_over_serial(byte_array):
     print(f"byte_array len {len(byte_array)}")
     data_to_send = split_data_to_fit_size(byte_array)
     # print(f"data_to_send {data_to_send}")
-    split_data = split_list_by_byte_size(data_to_send, 512)
+    split_data = split_list_by_byte_size(data_to_send, 256)
     # print(f"split_data {split_data}")
     for chunk in split_data:
         # print(f"chunk {chunk}")
@@ -179,6 +179,7 @@ if __name__ == "__main__":
     # send_image_over_serial(byte_array)
     while True:
         for byte_array in byte_arrays:
+            # sleep(0.2)
             send_image_over_serial(byte_array)
             data = ""
             while(True):
@@ -187,7 +188,7 @@ if __name__ == "__main__":
                 print(f"Received: {data}")
                 if "accepted" in data:
                     print("compltete frame")
-                    # sleep(0.1)
+                    ser.flush()
                     break
                 # sleep(0.1)
 

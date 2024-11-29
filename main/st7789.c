@@ -13,6 +13,7 @@
 
 #define TAG "ST7789"
 #define	_DEBUG_ 0
+#define SPI_POOLING 1
 
 #if 0
 #ifdef CONFIG_IDF_TARGET_ESP32
@@ -127,7 +128,7 @@ bool spi_master_write_byte(spi_device_handle_t SPIHandle, const uint8_t* Data, s
 		memset( &SPITransaction, 0, sizeof( spi_transaction_t ) );
 		SPITransaction.length = DataLength * 8;
 		SPITransaction.tx_buffer = Data;
-#if 0
+#ifndef SPI_POOLING
 		ret = spi_device_transmit( SPIHandle, &SPITransaction );
 #else
 		ret = spi_device_polling_transmit( SPIHandle, &SPITransaction );
