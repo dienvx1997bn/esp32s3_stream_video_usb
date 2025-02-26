@@ -23,4 +23,4 @@ def gif_to_jpg_frames(gif_path, output_folder, output_size=(240, 240)):
     print("All frames converted and saved as JPGs.")
 
 # Example usage:
-gif_to_jpg_frames("test.gif", "images")
+gif_to_jpg_frames("test.gif", "gif_images")
