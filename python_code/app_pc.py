@@ -8,18 +8,24 @@ def send_jpeg_over_usb(ser, file_path):
         jpeg_data = f.read()
         total_size = len(jpeg_data)
         
-        # Gửi Header: [0xAA 0xBB Size (4 bytes)]
         header = bytes([0xAA, 0xBB]) + total_size.to_bytes(4, 'big')
-        print(f"Sending Header: {[hex(x) for x in header]} total byte {total_size}")
+        print(f"Sending Header: {[hex(x) for x in header]}")
         ser.write(header)
-        # ser.flush()
-        # sleep(0.1)
+        ser.flush()
 
-        # Gửi dữ liệu JPEG
         print(f"Sending {file_path}, size: {total_size} bytes")
         ser.write(jpeg_data)
-        # ser.flush()
+        ser.flush()
         print(f"Sent {total_size} bytes over USB")
+
+def wait_for_ready(ser):
+    # print("Waiting for 'ready' signal from ESP...")
+    while True:
+        line = ser.readline().decode('utf-8').strip()
+        if line == "ready":
+            # print("Received 'ready' signal from ESP")
+            return True
+        sleep(0.1)  # Ngắn để tránh delay quá lâu
 
 def main():
     if len(sys.argv) < 2:
@@ -43,11 +49,17 @@ def main():
         sys.exit(1)
 
     try:
+        index = 0
         while True:
-            for filename in jpeg_files:
-                file_path = os.path.join(folder_path, filename)
-                send_jpeg_over_usb(ser, file_path)
-                sleep(0.15)  # Delay giữa các file
+            # Gửi file JPEG tiếp theo
+            file_path = os.path.join(folder_path, jpeg_files[index])
+            send_jpeg_over_usb(ser, file_path)
+
+            # Tăng index, quay lại đầu danh sách nếu hết
+            index = (index + 1) % len(jpeg_files)
+
+            # Chờ tín hiệu "ready" từ ESP
+            wait_for_ready(ser)
     except KeyboardInterrupt:
         print("Stopped by user")
     finally:

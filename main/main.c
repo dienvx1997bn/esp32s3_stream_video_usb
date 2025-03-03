@@ -45,8 +45,8 @@ typedef struct {
 
 RingBuffer_t ring_buffer = { .head = 0, .tail = 0, .count = 0 };
 TFT_t dev;
-uint8_t current_buffer[IMAGE_BUFFER_SIZE]; // Buffer hiện đang hiển thị
-uint8_t new_buffer[IMAGE_BUFFER_SIZE];     // Buffer cho hình mới giải mã
+uint8_t current_buffer[IMAGE_BUFFER_SIZE];
+uint8_t new_buffer[IMAGE_BUFFER_SIZE];
 static uint32_t expected_jpeg_size = 0;
 static uint32_t received_jpeg_size = 0;
 static bool receiving_jpeg = false;
@@ -86,7 +86,7 @@ void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event) {
 
     esp_err_t ret = tinyusb_cdcacm_read(itf, tusb_buf, CONFIG_TINYUSB_CDC_RX_BUFSIZE, &rx_size);
     if (ret != ESP_OK || rx_size < 1) {
-        ESP_LOGW(TAG, "Read failed or too short");
+        // ESP_LOGW(TAG, "Read failed or too short");
         return;
     }
 
@@ -107,20 +107,28 @@ void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event) {
         received_jpeg_size += rx_size;
 
         if (received_jpeg_size >= expected_jpeg_size) {
-            ESP_LOGI(TAG, "Full JPEG received: %" PRIu32 " bytes", received_jpeg_size);
+            // ESP_LOGI(TAG, "Full JPEG received: %" PRIu32 " bytes", received_jpeg_size);
             receiving_jpeg = false;
             gpio_set_level(GPIO_NUM_10, 0);
         }
     } else {
-        ESP_LOGW(TAG, "Unexpected data received, ignoring");
+        // ESP_LOGW(TAG, "Unexpected data received, ignoring");
     }
 
     gpio_set_level(GPIO_NUM_6, 0);
 }
 
+// Gửi thông điệp "ready" về PC
+void send_ready_signal() {
+    const char *ready_msg = "ready\n";
+    tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, (const uint8_t *)ready_msg, strlen(ready_msg));
+    tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
+    // ESP_LOGI(TAG, "Sent 'ready' signal to PC");
+}
+
 // Task giải mã JPEG
 void JPEG_decode_task(void *pvParameters) {
-    ESP_LOGI(TAG, "JPEG_decode_task running on core %d", xPortGetCoreID());
+    // ESP_LOGI(TAG, "JPEG_decode_task running on core %d", xPortGetCoreID());
 
     uint8_t *jpeg_buffer = malloc(RING_BUFFER_SIZE);
 
@@ -147,13 +155,15 @@ void JPEG_decode_task(void *pvParameters) {
             esp_jpeg_image_output_t outimg;
             esp_err_t ret = esp_jpeg_decode(&jpeg_cfg, &outimg);
             if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "JPEG decoded successfully! Size: %dpx x %dpx", outimg.width, outimg.height);
+                // ESP_LOGI(TAG, "JPEG decoded successfully! Size: %dpx x %dpx", outimg.width, outimg.height);
                 decode_success = true;
             } else {
-                ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
+                // ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
             }
 
             gpio_set_level(GPIO_NUM_9, 0);
+            // Gửi tín hiệu "ready" về PC sau khi hiển thị thành công
+            send_ready_signal();
         }
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
@@ -162,10 +172,10 @@ void JPEG_decode_task(void *pvParameters) {
 
 // Task hiển thị lên ST7789 với so sánh từng dòng
 void ST7789_display_task(void *pvParameters) {
-    ESP_LOGI(TAG, "ST7789_display_task running on core %d", xPortGetCoreID());
+    // ESP_LOGI(TAG, "ST7789_display_task running on core %d", xPortGetCoreID());
 
     while (1) {
-        if (decode_success) {
+        // if (decode_success) {
             gpio_set_level(GPIO_NUM_7, 1);
 
             // So sánh từng dòng giữa new_buffer và current_buffer
@@ -176,20 +186,21 @@ void ST7789_display_task(void *pvParameters) {
                 // Kiểm tra nếu dòng có thay đổi
                 if (memcmp(new_row, current_row, SCREEN_WIDTH * 2) != 0) {
                     lcdDrawMultiPixels_2(&dev, 0, row, SCREEN_WIDTH, new_row);
-                    // Cập nhật current_buffer cho dòng vừa hiển thị
                     memcpy(current_row, new_row, SCREEN_WIDTH * 2);
                 }
             }
 
             gpio_set_level(GPIO_NUM_7, 0);
-            ESP_LOGI(TAG, "Updated changed rows on ST7789");
-            decode_success = false;
-        }
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+            // ESP_LOGI(TAG, "Updated changed rows on ST7789");
+        // }
+        vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
 
 void app_main(void) {
+    memset(current_buffer, 0x1F, IMAGE_BUFFER_SIZE);
+    memset(new_buffer, 0x1F, IMAGE_BUFFER_SIZE);
+
     const tinyusb_config_t tusb_cfg = {
         .device_descriptor = NULL,
         .string_descriptor = NULL,
@@ -210,7 +221,10 @@ void app_main(void) {
     };
 
     ESP_ERROR_CHECK(tusb_cdc_acm_init(&acm_cfg));
-    ESP_LOGI(TAG, "USB initialization DONE");
+    // ESP_LOGI(TAG, "USB initialization DONE");
+
+    // Gửi tín hiệu "ready" ban đầu để báo PC bắt đầu
+    send_ready_signal();
 
     gpio_config_t io_conf = {
         .intr_type = GPIO_INTR_DISABLE,
