@@ -30,7 +30,7 @@ def main():
     ser = serial.Serial(com_port, 921600, timeout=1)
     print(f"Connected to {com_port}")
 
-    folder_path = "gif_images"
+    folder_path = "cartoon"
     if not os.path.exists(folder_path):
         print("Folder 'images' not found")
         ser.close()
@@ -47,7 +47,7 @@ def main():
             for filename in jpeg_files:
                 file_path = os.path.join(folder_path, filename)
                 send_jpeg_over_usb(ser, file_path)
-                sleep(0.2)  # Delay giữa các file
+                sleep(0.15)  # Delay giữa các file
     except KeyboardInterrupt:
         print("Stopped by user")
     finally:

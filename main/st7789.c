@@ -301,6 +301,30 @@ void lcdDrawMultiPixels(TFT_t * dev, uint16_t x, uint16_t y, uint16_t size, uint
 	spi_master_write_colors(dev, colors, size);
 }
 
+void lcdDrawMultiPixels_2(TFT_t * dev, uint16_t x, uint16_t y, uint16_t size, uint16_t * colors) {
+	if (x+size > dev->_width) return;
+	if (y >= dev->_height) return;
+
+	static uint16_t _x1 = 0;
+	static uint16_t _x2 = 0;
+	static uint16_t _y1 = 0;
+	static uint16_t _y2 = 0;
+
+	if(x != _x1) {
+		_x1 = x + dev->_offsetx;
+		_x2 = _x1 + (size-1);
+		spi_master_write_command(dev, 0x2A);	// set column(x) address
+		spi_master_write_addr(dev, _x1, _x2);
+	}
+	_y1 = y + dev->_offsety;
+	_y2 = _y1;
+
+	spi_master_write_command(dev, 0x2B);	// set Page(y) address
+	spi_master_write_addr(dev, _y1, _y2);
+	spi_master_write_command(dev, 0x2C);	//	Memory Write
+	spi_master_write_colors(dev, colors, size);
+}
+
 // Draw rectangle of filling
 // x1:Start X coordinate
 // y1:Start Y coordinate
